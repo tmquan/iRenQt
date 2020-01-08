@@ -30,7 +30,7 @@ class Renderer(QMainWindow):
 
     def display(self):
         global fname
-        fname = QFileDialog.getOpenFileName(self, 'Open file...', 'd:\\',"Image Files (*.jpg *.tif *.bmp *.png)")
+        fname = QFileDialog.getOpenFileName(self, 'Open file...', '/home/tmquan/iRenQt/',"Image Files (*.jpg *.tif *.bmp *.png)")
         print(fname)
         data = skimage.io.imread(fname[0])
         print(data.shape)
