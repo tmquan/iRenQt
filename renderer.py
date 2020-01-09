@@ -2,22 +2,19 @@ import sys
 import cv2
 import skimage.io
 import numpy as np
+from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import*
 from PyQt5.uic import loadUi
-from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import QDialog, QFileDialog, QFrame, QVBoxLayout
-from PyQt5.QtGui import QIcon, QPixmap, QImage
+from PyQt5.QtGui import QIcon, QPixmap, QImage, QPainter
+from PyQt5.QtCore import Qt, QPoint
 
 import vtk
 from vtk import *
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
-from PyQt5 import QtCore as qtc
-from PyQt5 import QtWidgets as qtw
-
 import qimage2ndarray
-fname = ""
-    
+  
 class Renderer(QMainWindow):
 
     def __init__(self):
@@ -25,25 +22,33 @@ class Renderer(QMainWindow):
         loadUi("renderer.ui",self)
 
         self.setWindowTitle("Reinforcement Volume Rendering")
-        self.pbOpen.clicked.connect(self.display)
-        # self.pbGrayImage.clicked.connect(self.convert_to_gray)
+        self.pbOpen.clicked.connect(self.load_data)
+        self.pbOpen.clicked.connect(self.display_editor)
+        self.pbOpen.clicked.connect(self.display_slices)
+        self.pbOpen.clicked.connect(self.display_screen)
 
-    def display(self):
-        global fname
-        fname = QFileDialog.getOpenFileName(self, 'Open file...', '/home/tmquan/iRenQt/',"Image Files (*.jpg *.tif *.bmp *.png)")
-        print(fname)
-        data = skimage.io.imread(fname[0])
-        print(data.shape)
-        dimz, dimy, dimx = data.shape
-        dataXY = data[int(dimz/2),:,:]
-        dataXZ = data[:,int(dimy/2),:]
-        dataYZ = data[:,:,int(dimx/2)]
+    def load_data(self):
+        self.fname = QFileDialog.getOpenFileName(self, 'Open file...', '/home/tmquan/iRenQt/',"Image Files (*.jpg *.tif *.bmp *.png)")
+        print(self.fname)
+        self.data = skimage.io.imread(self.fname[0])
+        print(self.data.shape)
+
+    def display_editor(self):        
+        self.canvas = QPixmap(409, 209)
+        self.canvas.fill(Qt.black)
+        self.labelEditor.setPixmap(self.canvas)
+
+    def display_slices(self):
+        dimz, dimy, dimx = self.data.shape
+        dataXY = self.data[int(dimz/2),:,:]
+        dataXZ = self.data[:,int(dimy/2),:]
+        dataYZ = self.data[:,:,int(dimx/2)]
 
         self.labelXY.setPixmap(QPixmap.fromImage(qimage2ndarray.array2qimage(dataXY)))
         self.labelXZ.setPixmap(QPixmap.fromImage(qimage2ndarray.array2qimage(dataXZ)))
         self.labelYZ.setPixmap(QPixmap.fromImage(qimage2ndarray.array2qimage(dataYZ)))
 
-        ###
+    def display_screen(self):
         self.frame = QFrame()
  
         self.vtkWidget = QVTKRenderWindowInteractor(self.frame)
@@ -55,7 +60,7 @@ class Renderer(QMainWindow):
         self.renWinInt = self.renWindow.GetInteractor()
 
         self.reader = vtkTIFFReader()
-        self.reader.SetFileName(fname[0])
+        self.reader.SetFileName(self.fname[0])
         self.reader.Update()
         
         self.mapper = vtkFixedPointVolumeRayCastMapper()
@@ -87,9 +92,9 @@ class Renderer(QMainWindow):
         self.render.SetBackground(0.0, 0.0, 0.0)
         self.render.AddVolume(self.data)
 
-        self.show()
+        # self.show()
         self.renWinInt.Initialize()
-        self.renWindow.Render()
+        # self.renWindow.Render()
         self.renWinInt.Start()
         
 if __name__=="__main__":

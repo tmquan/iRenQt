@@ -53,7 +53,15 @@
       <height>211</height>
      </rect>
     </property>
-    <layout class="QVBoxLayout" name="layoutEditor"/>
+    <layout class="QVBoxLayout" name="layoutEditor">
+     <item>
+      <widget class="QLabel" name="labelEditor">
+       <property name="text">
+        <string/>
+       </property>
+      </widget>
+     </item>
+    </layout>
    </widget>
    <widget class="QWidget" name="verticalLayoutWidget_4">
     <property name="geometry">
