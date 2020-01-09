@@ -6,7 +6,7 @@ from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as Navigati
 from PyQt5.QtWidgets import*
 from PyQt5.uic import loadUi
 from PyQt5.QtWidgets import QDialog, QFileDialog, QFrame, QVBoxLayout
-from PyQt5.QtGui import QIcon, QPixmap, QImage, QPainter
+from PyQt5.QtGui import QIcon, QPixmap, QImage, QPainter, QFont
 from PyQt5.QtCore import Qt, QPoint
 
 import vtk
@@ -26,6 +26,7 @@ class Renderer(QMainWindow):
         self.pbOpen.clicked.connect(self.display_editor)
         self.pbOpen.clicked.connect(self.display_slices)
         self.pbOpen.clicked.connect(self.display_screen)
+        
 
     def load_data(self):
         self.fname = QFileDialog.getOpenFileName(self, 'Open file...', '/home/tmquan/iRenQt/',"Image Files (*.jpg *.tif *.bmp *.png)")
@@ -33,10 +34,23 @@ class Renderer(QMainWindow):
         self.data = skimage.io.imread(self.fname[0])
         print(self.data.shape)
 
+        self.hist, self.bin_edges = np.histogram(self.data, bins=255, density=True)
+
     def display_editor(self):        
         self.canvas = QPixmap(409, 209)
-        self.canvas.fill(Qt.black)
+        self.canvas.fill(Qt.white)
         self.labelEditor.setPixmap(self.canvas)
+        self.draw_histogram()
+
+    def draw_histogram(self):
+        painter = QPainter(self.labelEditor.pixmap())
+        font = QFont()
+        font.setFamily('Times')
+        font.setBold(True)
+        font.setPointSize(40)
+        painter.setFont(font)
+        painter.drawText(100, 45, 'Histogram') # x, y coordinates
+        painter.end()
 
     def display_slices(self):
         dimz, dimy, dimx = self.data.shape
