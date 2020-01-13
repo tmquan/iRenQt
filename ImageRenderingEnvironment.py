@@ -23,7 +23,8 @@ import torchvision
 import gym
 
 from environment.BaseEnvironment import BaseEnvironment
-from models.uppnet import UPPNet
+
+from skimage.metrics import structural_similarity as ssim
 
 def prob2size(prob, size):
     # Samples are uniformly distributed over the half-open interval [low, high) (includes low, but excludes high)
@@ -40,19 +41,47 @@ def prob2prob(prob, low, high):
 
 
 class ImageRenderingEnvironment(BaseEnvironment):
-    def __init__(self, **kwargs):
-        self.action_space = gym.spaces.Box(low=0.0, high=1.0, shape=(5,))
-        self.global_step = 0
-        self.global_episode = 0
+    def __init__(self, 
+        max_step_per_episode=30, 
+        target=None, 
+        volume=None, 
+        writer=None):
+        """Environment for an agent can interact to adjust the lookup table
+        
+        [description]
+        
+        Arguments:
+            **kwargs {[type]} -- [description]
+        """
         self.max_step_per_episode = max_step_per_episode
         self.writer = writer
+        assert target is not None and volume is not None
+        self.target = target # RGB Image
+        self.volume = volume # Gray Image to construct the lookup table
+        
+        self.screen = None 
+        self.action_space = gym.spaces.Box(low=0.0, high=1.0, shape=(5,)) # {Pixel Value: R G B A}
+        self.global_step = 0
+        self.global_episode = 0
 
         self.reset()
 
     
 
     def reset(self):
-        pass
+        zeros = np.zeros(256, np.dtype('uint8'))
+        self.LTable = np.stack((zeros, zeros, zeros), 1)
+        self.screen = np.zeros_like(self.target) # RGB Image to be painted, 
+        self.curr_rwd = 0 
+        self.prev_rwd = self.curr_rwd
+        self.trial = 0
+        
+        obs = np.concatenate([self.screen / 255.0, self.target / 255.0 ], -1)
+        obs = np.transpose(obs, (2, 0, 1))
+        obs = obs[np.newaxis,...]
+        print(self.screen.shape, self.target.shape, self.LTable.shape, obs.shape)
+
+        return obs
 
     def step(self, action):
         # Need to return obs, rwd, done, info 
@@ -61,24 +90,52 @@ class ImageRenderingEnvironment(BaseEnvironment):
         done = None
         info = None
 
+        
+        Dvalue = prob2size(action[0], 256) # Data value
+        Rvalue = prob2size(action[1], 256)
+        Gvalue = prob2size(action[2], 256)
+        Bvalue = prob2size(action[3], 256)
+        Avalue = prob2size(action[4], 256)
+
+        self.LTable[Dvalue] = np.array([Rvalue, Gvalue, Bvalue]) # TODO
+
+        # Ray cast the data with new lookup table        
+        self.screen = self.LTable[tuple(self.volume.transpose())] #.transpose()
+        # print(self.screen.shape, self.target.shape)
+
+        # Update the reward
+        ssim_score = ssim(self.screen, self.target, multichannel=True)
+        self.curr_rwd = ssim_score
+        rwd = self.curr_rwd - self.prev_rwd
 
         # Update flags
+        done = True if self.trial == self.max_step_per_episode  else False
         self.global_step += 1
         self.trial += 1
         self.prev_rwd = self.curr_rwd
-        print('Local step {}, Action is {}, Reward is {}, Rand score is {}'.format(self.trial, action, rwd, rand_score))
+        
+        obs = np.concatenate([self.screen / 255.0, self.target / 255.0 ], -1)
+        obs = np.transpose(obs, (2, 0, 1))
+        obs = obs[np.newaxis,...]
+        # print(self.screen.shape, self.target.shape, obs.shape)
+        cv2.imshow('', np.concatenate([self.screen, self.target], 1))
+        cv2.waitKey(10)
+        print('Local step {}, Action is {}, Reward is {}, SSIM score is {} {}'.format(self.trial, action, rwd, ssim_score, done))
         return obs, rwd, done, info
 
 
 if __name__ == '__main__':
     writer = SummaryWriter()
-    env = ImageRenderingEnvironment(writer=writer)
+    target = np.zeros((256 ,256, 3), np.uint8)
+    volume = np.zeros((256 ,256, 1), np.uint8)
+
+    target[:] = [255, 255, 0]
+    volume[:] = [120]
+    env = ImageRenderingEnvironment(writer=writer, target=target, volume=volume)
 
     # if args.mode == 'random':
     np.random.seed(2222)
-    obs, rwd, done, info = env.step([0, 0, 0, 0])
+    obs, rwd, done, info = env.step([0, 0, 0, 0, 0])
     for _ in range(100):
-        act = np.random.uniform(0, 1, 4)
-        # print(act)
+        act = np.random.uniform(0, 1, 5)
         obs, rwd, done, info = env.step(act)
-        print(done)
