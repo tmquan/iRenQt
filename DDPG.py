@@ -78,38 +78,73 @@ class Replay_buffer():
         # print(x.shape, y.shape, u.shape, r.shape, d.shape)
         return x, y, u, r, d
 
+def init_weights(m):
+    if hasattr(m, 'reset_parameters'):
+        m.reset_parameters()
+    if isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Conv2d):
+        m.weight.data.normal_(0.0, 0.05)
+        if m.bias is not None:
+            m.bias.data.fill_(0)
+    elif isinstance(m, nn.BatchNorm2d):
+        m.weight.data.normal_(1.0, 0.05)
+        m.bias.data.fill_(0)
+    elif isinstance(m, nn.Linear):
+        m.weight.data.normal_(0.0, 0.1)
+        if m.bias is not None:
+            m.bias.data.fill_(0)
+            
 class Actor(nn.Module):
     def __init__(self, num_classes=5):
         super(Actor, self).__init__()
-        self.model = getattr(torchvision.models, 'densenet121')(pretrained=False)
-        self.model.features.conv0 = nn.Conv2d(6, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        self.model.classifier = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(1024, num_classes),
+
+        self.model = getattr(torchvision.models, 'resnet18')(pretrained=False)
+        self.model.conv1 = nn.Conv2d(9, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.model.fc = nn.Sequential(
+            # nn.Dropout(0.5),
+            nn.Linear(512, num_classes),
             nn.Sigmoid()
             )
+        self.model.apply(init_weights)
+        
+        # self.model = getattr(torchvision.models, 'densnet121')(pretrained=False)
+        # self.model.features.conv0 = nn.Conv2d(9, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        # self.model.classifier = nn.Sequential(
+        #     # nn.Dropout(0.5),
+        #     nn.Linear(1024, num_classes),
+        #     nn.Sigmoid()
+        #     )
 
     def forward(self, x):
-        logit = self.model(x / 127.5 - 1.0)
+        logit = self.model(x)
         return logit
 
 class Critic(nn.Module):
     def __init__(self, num_classes=1):
         super(Critic, self).__init__()
-        self.model = getattr(torchvision.models, 'densenet121')(pretrained=False)
-        self.model.features.conv0 = nn.Conv2d(11, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        self.model.classifier = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(1024, num_classes),
+        self.model = getattr(torchvision.models, 'resnet18')(pretrained=False)
+        self.model.conv1 = nn.Conv2d(14, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.model.fc = nn.Sequential(
+            # nn.Dropout(0.5),
+            nn.Linear(512, num_classes),
             nn.Sigmoid()
             )
+        self.model.apply(init_weights)
+        
+
+        # self.model = getattr(torchvision.models, 'densnet121')(pretrained=False)
+        # self.model.features.conv0 = nn.Conv2d(14, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        # self.model.classifier = nn.Sequential(
+        #     # nn.Dropout(0.5),
+        #     nn.Linear(1024, num_classes),
+        #     nn.Sigmoid()
+        #     )
 
     def forward(self, x, y):
         # print(y.shape)
         y = y.reshape(y.shape[0], y.shape[1], 1, 1)
         y = F.upsample(y, size=(256, 256), mode='nearest')
         # print(y.shape)
-        logit = self.model(torch.cat([x / 127.5 - 1.0, y], 1))
+        logit = self.model(torch.cat([x, y], 1))
         return logit
 
 class DDPG(object):
@@ -121,13 +156,15 @@ class DDPG(object):
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = RAdam(self.actor.parameters(), lr=self.hparams.lr, 
             betas=(0.9, 0.99), weight_decay=1e-4)
-
+        self.actor_scheduler = optim.lr_scheduler.CosineAnnealingLR(self.actor_optimizer, T_max=10)
 
         self.critic = Critic(num_classes=1).to(self.device)
         self.critic_target = Critic(num_classes=1).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = RAdam(self.actor.parameters(), lr=self.hparams.lr, 
             betas=(0.9, 0.99), weight_decay=1e-4)
+        self.critic_scheduler = optim.lr_scheduler.CosineAnnealingLR(self.critic_optimizer, T_max=10)
+
         self.replay_buffer = Replay_buffer(max_size=self.hparams.capacity)
         self.writer = writer #SummaryWriter()
         self.num_critic_update_iteration = 0
@@ -158,14 +195,15 @@ class DDPG(object):
             current_Q = self.critic(state, action)
 
             # Compute critic loss
-            critic_loss = F.mse_loss(current_Q, target_Q)
+            # critic_loss = F.mse_loss(current_Q, target_Q)
+            critic_loss = nn.SmoothL1Loss()(current_Q, target_Q)
             self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             
             # Optimize the critic
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
             self.critic_optimizer.step()
-
+            # self.critic_scheduler.batch_step()
             # Compute actor loss
             actor_loss = -self.critic(state, self.actor(state)).mean()
             self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
@@ -174,6 +212,7 @@ class DDPG(object):
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()
+            # self.actor_scheduler.batch_step()
 
             # Update the frozen target models
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
@@ -213,11 +252,11 @@ def get_args():
 
     parser.add_argument('--learning_rate', '-lr', default=2e-4, type=float,
                             metavar='LR', help='initial learning rate', dest='lr')
-    parser.add_argument('--gamma', default=0.95, type=float) # discounted factor
-    parser.add_argument('--capacity', default=1000, type=int) # replay buffer size
+    parser.add_argument('--gamma', default=0.90, type=float) # discounted factor
+    parser.add_argument('--capacity', default=10000, type=int) # replay buffer size
     parser.add_argument('--batch_size', default=4, type=int) # mini batch size
-    parser.add_argument('--seed', default=True, type=bool)
-    parser.add_argument('--random_seed', default=2222, type=int)
+    parser.add_argument('--seed', type=int, default=2020,
+                            help='seed for initializing training. ')
     # optional parameters
 
     parser.add_argument('--sample_frequency', default=256, type=int)
@@ -226,9 +265,9 @@ def get_args():
     # parser.add_argument('--load', default=False, type=bool) # load model
     parser.add_argument('--load', action='store_true') # load model
     parser.add_argument('--render_interval', default=100, type=int) # after render_interval, the env.render() will work
-    parser.add_argument('--exploration_noise', default=0.4, type=float)
+    parser.add_argument('--exploration_noise', default=0.1, type=float)
     parser.add_argument('--max_episode', default=100000, type=int) # num of games
-    parser.add_argument('--max_step_per_episode', default=50, type=int) # num of games
+    parser.add_argument('--max_step_per_episode', default=5, type=int) # num of games
     parser.add_argument('--max_length_of_trajectory', default=2000, type=int) # num of games
     parser.add_argument('--print_log', default=1, type=int)
     parser.add_argument('--update_iteration', default=10, type=int)
@@ -252,12 +291,17 @@ def main(hparams):
 
 
     writer = SummaryWriter()
-    target = np.zeros((256 ,256, 3), np.uint8)
-    volume = np.zeros((256 ,256, 1), np.uint8)
-
-    target[:] = [255, 255, 0]
-    volume[:] = [120]
-    env = ImageRenderingEnvironment(writer=writer, target=target, volume=volume)
+    target = np.ones((256 ,256, 4), np.uint8)
+    volume = np.ones((256 ,256, 1), np.uint8)
+    # target[:,:] = [120, 64, 70, 30]
+    # volume[:] = [50]
+    target[:] = np.random.randint(0, 256, 4)
+    volume[:] = np.random.randint(0, 256, 1)
+    print(target.shape, volume.shape)
+    # target[:] = [255, 255, 0]
+    # volume[:] = [120]
+    env = ImageRenderingEnvironment(writer=writer, target=target, volume=volume, 
+        max_step_per_episode=hparams.max_step_per_episode)
 
     agent = DDPG(writer=writer, device=xpu, hparams=hparams)
     ep_r = 0

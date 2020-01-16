@@ -39,7 +39,7 @@ def prob2prob(prob, low, high):
     # prob from [0 to 1) -> size [0 to size)
     return (prob * (high-low) + low) 
 
-
+SHAPE = 256
 class ImageRenderingEnvironment(BaseEnvironment):
     def __init__(self, 
         max_step_per_episode=30, 
@@ -55,9 +55,9 @@ class ImageRenderingEnvironment(BaseEnvironment):
         """
         self.max_step_per_episode = max_step_per_episode
         self.writer = writer
-        assert target is not None and volume is not None
-        self.target = target # RGB Image
-        self.volume = volume # Gray Image to construct the lookup table
+        # assert target is not None and volume is not None
+        self.target = target if target is not None else np.zeros((SHAPE, SHAPE, 4), dtype=np.uint8) # RGB Image
+        self.volume = volume if volume is not None else np.zeros((SHAPE, SHAPE, 1), dtype=np.uint8) # Gray Image to construct the lookup table
         
         self.screen = None 
         self.action_space = gym.spaces.Box(low=0.0, high=1.0, shape=(5,)) # {Pixel Value: R G B A}
@@ -69,17 +69,24 @@ class ImageRenderingEnvironment(BaseEnvironment):
     
 
     def reset(self):
+        print("="*80)
+        print("Environment has been reset...")
+        print("="*80)
+
         zeros = np.zeros(256, np.dtype('uint8'))
-        self.LTable = np.stack((zeros, zeros, zeros), 1)
+        self.LTable = np.stack((zeros, zeros, zeros, zeros), 1)
         self.screen = np.zeros_like(self.target) # RGB Image to be painted, 
         self.curr_rwd = 0 
         self.prev_rwd = self.curr_rwd
         self.trial = 0
-        
-        obs = np.concatenate([self.screen / 255.0, self.target / 255.0 ], -1)
+
+        # self.target[:] = np.random.randint(0, 256, 4)
+        # self.volume[:] = np.random.randint(0, 256, 1)
+
+        obs = np.concatenate([self.volume / 255.0, self.target / 255.0, self.screen / 255.0 ], -1)
         obs = np.transpose(obs, (2, 0, 1))
         obs = obs[np.newaxis,...]
-        print(self.screen.shape, self.target.shape, self.LTable.shape, obs.shape)
+        print(self.volume[0,0], self.target[0,0],  self.screen.shape, self.target.shape, self.LTable.shape, obs.shape)
 
         return obs
 
@@ -97,39 +104,40 @@ class ImageRenderingEnvironment(BaseEnvironment):
         Bvalue = prob2size(action[3], 256)
         Avalue = prob2size(action[4], 256)
 
-        self.LTable[Dvalue] = np.array([Rvalue, Gvalue, Bvalue]) # TODO
+        self.LTable[Dvalue] = np.array([Rvalue, Gvalue, Bvalue, Avalue]) # TODO
 
-        # Ray cast the data with new lookup table        
+        # Ray cast the data with new lookup table       
+        # self.screen = np.zeros_like(self.target)  
+        # print(self.LTable)
         self.screen = self.LTable[tuple(self.volume.transpose())] #.transpose()
-        # print(self.screen.shape, self.target.shape)
 
         # Update the reward
-        ssim_score = ssim(self.screen, self.target, multichannel=True)
-        self.curr_rwd = ssim_score
+        score = ssim(self.screen, self.target, multichannel=True)
+        self.curr_rwd = score
         rwd = self.curr_rwd - self.prev_rwd
 
         # Update flags
-        done = True if self.trial == self.max_step_per_episode  else False
+        done = True if self.trial == self.max_step_per_episode else False
         self.global_step += 1
         self.trial += 1
-        self.prev_rwd = self.curr_rwd
-        
-        obs = np.concatenate([self.screen / 255.0, self.target / 255.0 ], -1)
+        self.prev_rwd = self.curr_rwd.copy()
+
+        obs = np.concatenate([self.volume / 255.0, self.target / 255.0, self.screen / 255.0 ], -1)
         obs = np.transpose(obs, (2, 0, 1))
         obs = obs[np.newaxis,...]
         # print(self.screen.shape, self.target.shape, obs.shape)
-        cv2.imshow('', np.concatenate([self.screen, self.target], 1))
-        cv2.waitKey(10)
-        print('Local step {}, Action is {}, Reward is {}, SSIM score is {} {}'.format(self.trial, action, rwd, ssim_score, done))
+        # cv2.imshow('', np.concatenate([cv2.cvtColor(self.volume, cv2.COLOR_GRAY2RGBA), self.screen, self.target], 1))
+        # cv2.waitKey(10)
+        print('Local step {}\t, Action is {}\t, Reward is {:0.5f}\t, Score is {:0.5f}\t    {}'.format(self.trial, [Dvalue, Rvalue, Gvalue, Bvalue, Avalue], rwd, score, done))
         return obs, rwd, done, info
 
 
 if __name__ == '__main__':
     writer = SummaryWriter()
-    target = np.zeros((256 ,256, 3), np.uint8)
+    target = np.zeros((256 ,256, 4), np.uint8)
     volume = np.zeros((256 ,256, 1), np.uint8)
 
-    target[:] = [255, 255, 0]
+    target[:] = [255, 255, 0, 0]
     volume[:] = [120]
     env = ImageRenderingEnvironment(writer=writer, target=target, volume=volume)
 
